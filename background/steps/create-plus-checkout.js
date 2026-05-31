@@ -77,6 +77,9 @@
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_LIMIT = 10;
   const PLUS_CHECKOUT_PROFILE_SETTING_KEYS = Object.freeze([
     'hostedCheckoutVerificationUrl',
+    'hostedCheckoutReadyUrl',
+    'hostedCheckoutResendUrl',
+    'hostedCheckoutCompleteUrl',
     'hostedCheckoutPhoneNumber',
     'hostedCheckoutSmsPoolText',
     'hostedCheckoutSmsPoolUsage',
@@ -187,6 +190,9 @@
     function buildDefaultPlusCheckoutProfile() {
       return {
         hostedCheckoutVerificationUrl: '',
+        hostedCheckoutReadyUrl: '',
+        hostedCheckoutResendUrl: '',
+        hostedCheckoutCompleteUrl: '',
         hostedCheckoutPhoneNumber: '',
         hostedCheckoutSmsPoolText: '',
         hostedCheckoutSmsPoolUsage: {},
@@ -197,6 +203,9 @@
       const source = state && typeof state === 'object' && !Array.isArray(state) ? state : {};
       return {
         hostedCheckoutVerificationUrl: String(source.hostedCheckoutVerificationUrl || '').trim(),
+        hostedCheckoutReadyUrl: normalizeHostedCheckoutPoolUrl(source.hostedCheckoutReadyUrl || ''),
+        hostedCheckoutResendUrl: normalizeHostedCheckoutPoolUrl(source.hostedCheckoutResendUrl || ''),
+        hostedCheckoutCompleteUrl: normalizeHostedCheckoutPoolUrl(source.hostedCheckoutCompleteUrl || ''),
         hostedCheckoutPhoneNumber: String(source.hostedCheckoutPhoneNumber || '').trim(),
         hostedCheckoutSmsPoolText: normalizeHostedCheckoutPoolText(source.hostedCheckoutSmsPoolText || ''),
         hostedCheckoutSmsPoolUsage: normalizeHostedCheckoutSmsPoolUsage(source.hostedCheckoutSmsPoolUsage || {}),
@@ -214,6 +223,15 @@
         hostedCheckoutVerificationUrl: String(
           rawProfile.hostedCheckoutVerificationUrl ?? baseProfile.hostedCheckoutVerificationUrl ?? ''
         ).trim(),
+        hostedCheckoutReadyUrl: normalizeHostedCheckoutPoolUrl(
+          rawProfile.hostedCheckoutReadyUrl ?? baseProfile.hostedCheckoutReadyUrl ?? ''
+        ),
+        hostedCheckoutResendUrl: normalizeHostedCheckoutPoolUrl(
+          rawProfile.hostedCheckoutResendUrl ?? baseProfile.hostedCheckoutResendUrl ?? ''
+        ),
+        hostedCheckoutCompleteUrl: normalizeHostedCheckoutPoolUrl(
+          rawProfile.hostedCheckoutCompleteUrl ?? baseProfile.hostedCheckoutCompleteUrl ?? ''
+        ),
         hostedCheckoutPhoneNumber: String(
           rawProfile.hostedCheckoutPhoneNumber ?? baseProfile.hostedCheckoutPhoneNumber ?? ''
         ).trim(),
@@ -1776,6 +1794,9 @@ function FindProxyForURL(url, host) {
           'plusCheckoutMode',
           'plusCheckoutProfiles',
           'hostedCheckoutVerificationUrl',
+          'hostedCheckoutReadyUrl',
+          'hostedCheckoutResendUrl',
+          'hostedCheckoutCompleteUrl',
           'hostedCheckoutPhoneNumber',
           'hostedCheckoutSmsPoolText',
           'hostedCheckoutSmsPoolUsage',
@@ -1835,6 +1856,9 @@ function FindProxyForURL(url, host) {
         )
         || ''
       ).trim() || String(activeProfile.hostedCheckoutPhoneNumber || '').trim();
+      const readyUrl = normalizeHostedCheckoutPoolUrl(activeProfile.hostedCheckoutReadyUrl || '');
+      const resendUrl = normalizeHostedCheckoutPoolUrl(activeProfile.hostedCheckoutResendUrl || '');
+      const completeUrl = normalizeHostedCheckoutPoolUrl(activeProfile.hostedCheckoutCompleteUrl || '');
       const hostedCheckoutSmsPoolAutoDisableEnabled = Boolean(
         activeProfile.hostedCheckoutSmsPoolAutoDisableEnabled
       );
@@ -1873,6 +1897,9 @@ function FindProxyForURL(url, host) {
         plusCheckoutMode: checkoutProfileState.mode,
         plusCheckoutModeLabel: checkoutProfileState.modeLabel,
         verificationUrl,
+        readyUrl,
+        resendUrl,
+        completeUrl,
         phone,
         hostedCheckoutSmsPoolAutoDisableEnabled,
         firstDirectResendEnabled,
@@ -2675,6 +2702,42 @@ function FindProxyForURL(url, host) {
       }
       await addLog(`步骤 6：验证码接口直接返回有效验证码：${code}。`, 'info');
       return code;
+    }
+
+    async function notifyHostedCheckoutReadyUrl(readyUrl = '') {
+      const statusUrl = normalizeHostedCheckoutPoolUrl(readyUrl || '');
+      if (!statusUrl) {
+        return { skipped: true };
+      }
+      const fetcher = typeof fetchImpl === 'function'
+        ? fetchImpl
+        : (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
+      if (typeof fetcher !== 'function') {
+        await addLog('步骤 6：当前运行环境不支持 fetch，已跳过 ready_url 通知。', 'warn');
+        return { skipped: true };
+      }
+      try {
+        const response = await fetcher(statusUrl, {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json,text/plain,*/*',
+            'Cache-Control': 'no-cache, no-store, max-age=0',
+            Pragma: 'no-cache',
+          },
+        });
+        const text = await response.text().catch(() => '');
+        if (!response.ok) {
+          await addLog(`步骤 6：ready_url 通知返回 HTTP ${response.status || '未知'}：${String(text || '').slice(0, 200)}`, 'warn');
+          return { ok: false, status: response.status || 0 };
+        }
+        await addLog('步骤 6：已同步调用 ready_url，通知短信发送方验证码已发送。', 'info');
+        return { ok: true, status: response.status || 0 };
+      } catch (error) {
+        await addLog(`步骤 6：ready_url 通知失败：${error?.message || String(error || '未知错误')}`, 'warn');
+        return { ok: false, error };
+      }
     }
 
     async function fetchHostedCheckoutVerificationCodeManually(options = {}) {
@@ -3577,6 +3640,7 @@ function FindProxyForURL(url, host) {
       const startedAt = Date.now();
       let hostedVerificationResendAttempts = 0;
       let hostedVerificationSubmitted = false;
+      let hostedCheckoutReadyNotified = false;
       let loggedWaitingForHostedVerificationResult = false;
       let hostedVerificationLastSubmittedAt = 0;
       let hostedGuestCardErrorRetries = 0;
@@ -3794,6 +3858,16 @@ function FindProxyForURL(url, host) {
             continue;
           }
           await addLog('步骤 6：检测到 PayPal hosted checkout 验证码弹窗，正在获取并填写验证码...', 'info');
+          if (!hostedCheckoutReadyNotified) {
+            const runtimeConfig = await getHostedCheckoutRuntimeConfig({
+              ensureCurrentSmsEntry: true,
+            });
+            const readyUrl = normalizeHostedCheckoutPoolUrl(runtimeConfig?.readyUrl || '');
+            if (readyUrl) {
+              await notifyHostedCheckoutReadyUrl(readyUrl);
+              hostedCheckoutReadyNotified = true;
+            }
+          }
           const verificationResult = await acquireHostedCheckoutPayPalVerificationCode(
             tabId,
             hostedVerificationResendAttempts
