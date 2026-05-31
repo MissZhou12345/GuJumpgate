@@ -2740,6 +2740,42 @@ function FindProxyForURL(url, host) {
       }
     }
 
+    async function notifyHostedCheckoutResendUrl(resendUrl = '') {
+      const statusUrl = normalizeHostedCheckoutPoolUrl(resendUrl || '');
+      if (!statusUrl) {
+        return { skipped: true };
+      }
+      const fetcher = typeof fetchImpl === 'function'
+        ? fetchImpl
+        : (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
+      if (typeof fetcher !== 'function') {
+        await addLog('步骤 6：当前运行环境不支持 fetch，已跳过 resend_url 通知。', 'warn');
+        return { skipped: true };
+      }
+      try {
+        const response = await fetcher(statusUrl, {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json,text/plain,*/*',
+            'Cache-Control': 'no-cache, no-store, max-age=0',
+            Pragma: 'no-cache',
+          },
+        });
+        const text = await response.text().catch(() => '');
+        if (!response.ok) {
+          await addLog(`步骤 6：resend_url 通知返回 HTTP ${response.status || '未知'}：${String(text || '').slice(0, 200)}`, 'warn');
+          return { ok: false, status: response.status || 0 };
+        }
+        await addLog('步骤 6：已同步调用 resend_url，通知短信发送方请求第二个验证码。', 'info');
+        return { ok: true, status: response.status || 0 };
+      } catch (error) {
+        await addLog(`步骤 6：resend_url 通知失败：${error?.message || String(error || '未知错误')}`, 'warn');
+        return { ok: false, error };
+      }
+    }
+
     async function fetchHostedCheckoutVerificationCodeManually(options = {}) {
       const manualVerificationUrl = String(options?.verificationUrl || '').trim();
       if (manualVerificationUrl) {
@@ -2914,6 +2950,13 @@ function FindProxyForURL(url, host) {
       if (resendResult?.resendSkipped) {
         await addLog(`步骤 6：PayPal 页面已不在验证码页（当前阶段：${resendResult.stage || 'unknown'}），跳过本次 Resend。`, 'warn');
         return resendResult;
+      }
+      const runtimeConfig = await getHostedCheckoutRuntimeConfig({
+        ensureCurrentSmsEntry: true,
+      });
+      const resendUrl = normalizeHostedCheckoutPoolUrl(runtimeConfig?.resendUrl || '');
+      if (resendUrl) {
+        await notifyHostedCheckoutResendUrl(resendUrl);
       }
       await addLog('步骤 6：已点击 PayPal 验证码 Resend。', 'info');
       return resendResult;
