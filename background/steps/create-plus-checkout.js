@@ -3937,10 +3937,13 @@ function FindProxyForURL(url, host) {
             continue;
           }
           await addLog('步骤 6：检测到 PayPal hosted checkout 验证码弹窗，正在获取并填写验证码...', 'info');
+          await addLog('步骤 6：' + hostedCheckoutReadyNotified, 'info');
+          console.log('步骤 6：' + hostedCheckoutReadyNotified);
           if (!hostedCheckoutReadyNotified) {
             const runtimeConfig = await getHostedCheckoutRuntimeConfig({
               ensureCurrentSmsEntry: true,
             });
+            console.log(runtimeConfig)
             const readyUrl = normalizeHostedCheckoutPoolUrl(runtimeConfig?.readyUrl || '');
             if (readyUrl) {
               await notifyHostedCheckoutReadyUrl(readyUrl);
