@@ -1168,6 +1168,16 @@ header {
   min-width: 0;
 }
 
+.hosted-checkout-send-link-inline {
+  flex: 1;
+  min-width: 0;
+}
+
+.hosted-checkout-send-link-inline .data-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .hosted-checkout-resend-settings-inline {
   flex-wrap: wrap;
   justify-content: flex-start;

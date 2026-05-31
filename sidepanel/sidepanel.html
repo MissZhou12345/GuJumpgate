@@ -369,6 +369,20 @@
           <span id="display-plus-checkout-conversion-proxy-test-result" class="data-value mono plus-checkout-conversion-proxy-test-result">未测试</span>
         </div>
       </div>
+      <div class="data-row" id="row-hosted-checkout-send-link" style="display:none;">
+        <span class="data-label">发码链接</span>
+        <div class="data-inline hosted-checkout-send-link-inline">
+          <input
+            id="input-hosted-checkout-send-link-url"
+            class="data-input"
+            type="text"
+            placeholder="https://..."
+            autocomplete="off"
+            spellcheck="false"
+            title="填写获取 PayPal 发码链接的接口 URL" />
+          <button type="button" id="btn-hosted-checkout-send-link-fetch" class="btn btn-outline btn-sm data-inline-btn">获取</button>
+        </div>
+      </div>
       <div class="data-row" id="row-hosted-checkout-verification-url" style="display:none;">
         <span class="data-label">验证码接口</span>
         <input type="text" id="input-hosted-checkout-verification-url" class="data-input"

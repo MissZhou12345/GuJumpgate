@@ -211,6 +211,9 @@ const inputPlusCheckoutCloudConversionApiKey = document.getElementById('input-pl
 const displayPlusCheckoutConversionProxyTestResult = document.getElementById('display-plus-checkout-conversion-proxy-test-result');
 const rowHostedCheckoutVerificationUrl = document.getElementById('row-hosted-checkout-verification-url');
 const inputHostedCheckoutVerificationUrl = document.getElementById('input-hosted-checkout-verification-url');
+const rowHostedCheckoutSendLink = document.getElementById('row-hosted-checkout-send-link');
+const inputHostedCheckoutSendLinkUrl = document.getElementById('input-hosted-checkout-send-link-url');
+const btnHostedCheckoutSendLinkFetch = document.getElementById('btn-hosted-checkout-send-link-fetch');
 const rowHostedCheckoutManualFetch = document.getElementById('row-hosted-checkout-manual-fetch');
 const btnHostedCheckoutManualFetch = document.getElementById('btn-hosted-checkout-manual-fetch');
 const displayHostedCheckoutManualCode = document.getElementById('display-hosted-checkout-manual-code');
@@ -650,10 +653,15 @@ const PLUS_CHECKOUT_MODE_LABELS = Object.freeze({
 });
 const PLUS_CHECKOUT_PROFILE_SETTING_KEYS = Object.freeze([
   'hostedCheckoutVerificationUrl',
+  'hostedCheckoutReadyUrl',
+  'hostedCheckoutResendUrl',
+  'hostedCheckoutCompleteUrl',
   'hostedCheckoutPhoneNumber',
   'hostedCheckoutSmsPoolText',
   'hostedCheckoutSmsPoolUsage',
 ]);
+let hostedCheckoutSendLinkUrlDraft = '';
+let hostedCheckoutSendLinkUrlTouched = false;
 const FIXED_PLUS_MODE_ENABLED = true;
 const GUIDE_REPOSITORY_URL = 'https://github.com/FoundZiGu/GuJumpgate';
 const SIGNUP_METHOD_EMAIL = 'email';
@@ -2727,6 +2735,9 @@ function normalizePlusCheckoutModeValue(value = '') {
 function buildDefaultPlusCheckoutProfile() {
   return {
     hostedCheckoutVerificationUrl: '',
+    hostedCheckoutReadyUrl: '',
+    hostedCheckoutResendUrl: '',
+    hostedCheckoutCompleteUrl: '',
     hostedCheckoutPhoneNumber: '',
     hostedCheckoutSmsPoolText: '',
     hostedCheckoutSmsPoolUsage: {},
@@ -2758,6 +2769,15 @@ function normalizePlusCheckoutProfileValue(profile = {}, fallback = null) {
     ),
     hostedCheckoutVerificationUrl: normalizeHostedCheckoutVerificationUrlValue(
       rawProfile.hostedCheckoutVerificationUrl ?? baseProfile.hostedCheckoutVerificationUrl
+    ),
+    hostedCheckoutReadyUrl: normalizeHostedCheckoutPoolUrlValue(
+      rawProfile.hostedCheckoutReadyUrl ?? baseProfile.hostedCheckoutReadyUrl
+    ),
+    hostedCheckoutResendUrl: normalizeHostedCheckoutPoolUrlValue(
+      rawProfile.hostedCheckoutResendUrl ?? baseProfile.hostedCheckoutResendUrl
+    ),
+    hostedCheckoutCompleteUrl: normalizeHostedCheckoutPoolUrlValue(
+      rawProfile.hostedCheckoutCompleteUrl ?? baseProfile.hostedCheckoutCompleteUrl
     ),
     hostedCheckoutPhoneNumber: normalizeHostedCheckoutPhoneValue(
       rawProfile.hostedCheckoutPhoneNumber ?? baseProfile.hostedCheckoutPhoneNumber
@@ -2807,6 +2827,9 @@ function buildLegacyPlusCheckoutProfileFromState(state = {}) {
     plusCheckoutCloudConversionApiKey: state?.plusCheckoutCloudConversionApiKey,
     plusCheckoutConversionProxyUrl: state?.plusCheckoutConversionProxyUrl,
     hostedCheckoutVerificationUrl: state?.hostedCheckoutVerificationUrl,
+    hostedCheckoutReadyUrl: state?.hostedCheckoutReadyUrl,
+    hostedCheckoutResendUrl: state?.hostedCheckoutResendUrl,
+    hostedCheckoutCompleteUrl: state?.hostedCheckoutCompleteUrl,
     hostedCheckoutPhoneNumber: state?.hostedCheckoutPhoneNumber,
     hostedCheckoutSmsPoolText: state?.hostedCheckoutSmsPoolText,
     hostedCheckoutSmsPoolUsage: state?.hostedCheckoutSmsPoolUsage,
@@ -2910,6 +2933,9 @@ function getSelectedPlusCheckoutMode(state = latestState) {
 function buildPlusCheckoutProfileFromInputs() {
   return normalizePlusCheckoutProfileValue({
     hostedCheckoutVerificationUrl: inputHostedCheckoutVerificationUrl?.value || '',
+    hostedCheckoutReadyUrl: latestState?.hostedCheckoutReadyUrl || '',
+    hostedCheckoutResendUrl: latestState?.hostedCheckoutResendUrl || '',
+    hostedCheckoutCompleteUrl: latestState?.hostedCheckoutCompleteUrl || '',
     hostedCheckoutPhoneNumber: inputHostedCheckoutPhone?.value || '',
     hostedCheckoutSmsPoolText: inputHostedCheckoutSmsPool?.value || '',
     hostedCheckoutSmsPoolUsage: latestState?.hostedCheckoutSmsPoolUsage || {},
@@ -3490,6 +3516,40 @@ function normalizeHostedCheckoutPhoneValue(value = '') {
   return String(value || '').trim();
 }
 
+// Removes supported PayPal SMS country prefixes from send-link phone responses.
+function normalizeHostedCheckoutPhoneFromSendLink(value = '') {
+  const normalized = normalizeHostedCheckoutPhoneValue(value);
+  if (normalized.startsWith('+81')) {
+    return normalized.slice(3);
+  }
+  if (normalized.startsWith('+1')) {
+    return normalized.slice(2);
+  }
+  return normalized;
+}
+
+// Keeps the user-provided send-link URL intact except for surrounding whitespace.
+function normalizeHostedCheckoutSendLinkUrlValue(value = '') {
+  return String(value || '').trim();
+}
+
+function setHostedCheckoutSendLinkInputValue(value = '', source = '') {
+  if (!inputHostedCheckoutSendLinkUrl) {
+    return;
+  }
+  const normalized = normalizeHostedCheckoutSendLinkUrlValue(value);
+  if (!normalized && (inputHostedCheckoutSendLinkUrl.value || hostedCheckoutSendLinkUrlDraft)) {
+    console.debug('[sidepanel] skip clearing hosted checkout send-link input', {
+      source,
+      currentValue: inputHostedCheckoutSendLinkUrl.value,
+      draft: hostedCheckoutSendLinkUrlDraft,
+    });
+    return;
+  }
+  hostedCheckoutSendLinkUrlDraft = normalized;
+  inputHostedCheckoutSendLinkUrl.value = normalized;
+}
+
 function normalizeHostedCheckoutPoolUrlValue(value = '') {
   const rawValue = String(value || '').trim();
   if (!rawValue) {
@@ -3503,6 +3563,23 @@ function normalizeHostedCheckoutPoolUrlValue(value = '') {
     return rawValue
       .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
       .replace(/[?&]$/g, '');
+  }
+}
+
+// Validates the send-link URL before issuing the fetch request from the side panel.
+function validateHostedCheckoutSendLinkUrl(value = '') {
+  const normalized = normalizeHostedCheckoutSendLinkUrlValue(value);
+  if (!normalized) {
+    return { valid: false, url: '', message: '请先填写发码链接。' };
+  }
+  try {
+    const parsed = new URL(normalized);
+    if (!/^https?:$/i.test(parsed.protocol)) {
+      return { valid: false, url: normalized, message: '发码链接只支持 http 或 https。' };
+    }
+    return { valid: true, url: parsed.toString(), message: '' };
+  } catch {
+    return { valid: false, url: normalized, message: '发码链接格式不正确。' };
   }
 }
 
@@ -5003,6 +5080,10 @@ function collectSettingsPayload() {
     ),
   };
   const activePlusCheckoutProfile = nextPlusCheckoutProfiles[selectedPlusCheckoutMode];
+  const hostedCheckoutSendLinkUrl = normalizeHostedCheckoutSendLinkUrlValue(
+    inputHostedCheckoutSendLinkUrl?.value || hostedCheckoutSendLinkUrlDraft || latestState?.hostedCheckoutSendLinkUrl || ''
+  );
+  hostedCheckoutSendLinkUrlDraft = hostedCheckoutSendLinkUrl;
   const hotmailAccountsForSave = getHotmailAccounts(latestState);
   return {
     ...(contributionModeEnabled ? {} : {
@@ -5055,6 +5136,7 @@ function collectSettingsPayload() {
     plusPaymentMethod,
     plusCheckoutMode: selectedPlusCheckoutMode,
     plusCheckoutProfiles: nextPlusCheckoutProfiles,
+    hostedCheckoutSendLinkUrl,
     paypalEmail: String(currentPayPalAccount?.email || latestState?.paypalEmail || '').trim(),
     paypalPassword: String(currentPayPalAccount?.password || latestState?.paypalPassword || ''),
     currentPayPalAccountId: String(latestState?.currentPayPalAccountId || '').trim(),
@@ -10854,6 +10936,7 @@ function updatePlusModeUI() {
     typeof rowPlusHostedCheckoutOauthDelay !== 'undefined' ? rowPlusHostedCheckoutOauthDelay : null,
     typeof rowPlusCheckoutConversionProxy !== 'undefined' ? rowPlusCheckoutConversionProxy : null,
     typeof rowPlusCheckoutConversionProxyTest !== 'undefined' ? rowPlusCheckoutConversionProxyTest : null,
+    typeof rowHostedCheckoutSendLink !== 'undefined' ? rowHostedCheckoutSendLink : null,
     typeof rowHostedCheckoutVerificationUrl !== 'undefined' ? rowHostedCheckoutVerificationUrl : null,
     typeof rowHostedCheckoutManualFetch !== 'undefined' ? rowHostedCheckoutManualFetch : null,
     typeof rowHostedCheckoutPhone !== 'undefined' ? rowHostedCheckoutPhone : null,
@@ -11882,6 +11965,10 @@ function applySettingsState(state) {
   }
   if (typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod) {
     selectPlusPaymentMethod.value = normalizePlusPaymentMethod(state?.plusPaymentMethod);
+  }
+  if (inputHostedCheckoutSendLinkUrl && !hostedCheckoutSendLinkUrlTouched) {
+    setHostedCheckoutSendLinkInputValue(state?.hostedCheckoutSendLinkUrl || '', 'applySettingsState');
+    hostedCheckoutSendLinkUrlTouched = Boolean(hostedCheckoutSendLinkUrlDraft);
   }
   applyPlusCheckoutProfileToInputs(state, {
     mode: state?.plusCheckoutMode,
@@ -15148,13 +15235,22 @@ const hostedSmsPoolManager = window.SidepanelHostedSmsPoolManager?.createHostedS
       if (inputHostedCheckoutVerificationUrl) {
         inputHostedCheckoutVerificationUrl.value = '';
       }
+      if (inputHostedCheckoutSendLinkUrl) {
+        hostedCheckoutSendLinkUrlDraft = '';
+        hostedCheckoutSendLinkUrlTouched = false;
+        inputHostedCheckoutSendLinkUrl.value = '';
+      }
       if (inputHostedCheckoutPhone) {
         inputHostedCheckoutPhone.value = '';
       }
       syncActivePlusCheckoutProfilePatch({
         hostedCheckoutVerificationUrl: '',
+        hostedCheckoutReadyUrl: '',
+        hostedCheckoutResendUrl: '',
+        hostedCheckoutCompleteUrl: '',
         hostedCheckoutPhoneNumber: '',
       });
+      syncLatestState({ hostedCheckoutSendLinkUrl: '' });
       validateHostedCheckoutContactConfig();
     },
   },
@@ -18237,6 +18333,90 @@ async function handleHostedCheckoutManualFetch() {
   }
 }
 
+// Fetches the configured send-link endpoint and fills PayPal Hosted Checkout SMS fields.
+async function handleHostedCheckoutSendLinkFetch() {
+  if (!btnHostedCheckoutSendLinkFetch) {
+    return;
+  }
+
+  const validation = validateHostedCheckoutSendLinkUrl(inputHostedCheckoutSendLinkUrl?.value || '');
+  if (inputHostedCheckoutSendLinkUrl) {
+    setHostedCheckoutSendLinkInputValue(validation.url, 'handleHostedCheckoutSendLinkFetch:validation');
+    hostedCheckoutSendLinkUrlDraft = validation.url;
+    hostedCheckoutSendLinkUrlTouched = true;
+    inputHostedCheckoutSendLinkUrl.classList.toggle('is-invalid', !validation.valid);
+    inputHostedCheckoutSendLinkUrl.title = validation.valid ? '' : validation.message;
+  }
+  if (!validation.valid) {
+    inputHostedCheckoutSendLinkUrl?.focus?.();
+    showToast(validation.message, 'error');
+    return;
+  }
+
+  const previousLabel = btnHostedCheckoutSendLinkFetch.textContent;
+  btnHostedCheckoutSendLinkFetch.disabled = true;
+  btnHostedCheckoutSendLinkFetch.textContent = '获取中...';
+
+  try {
+    const response = await fetch(validation.url, {
+      method: 'GET',
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    const detail = String(payload?.detail || '').trim();
+    const codeUrl = normalizeHostedCheckoutVerificationUrlValue(payload?.code_url || '');
+    const readyUrl = normalizeHostedCheckoutPoolUrlValue(payload?.ready_url || '');
+    const resendUrl = normalizeHostedCheckoutPoolUrlValue(payload?.resend_url || '');
+    const completeUrl = normalizeHostedCheckoutPoolUrlValue(payload?.complete_url || '');
+    const phone = normalizeHostedCheckoutPhoneFromSendLink(payload?.phone || '');
+
+    if (!response.ok || !codeUrl || !phone) {
+      showToast(detail || `获取发码链接失败（HTTP ${response.status || '未知'}）。`, 'error');
+      return;
+    }
+
+    if (inputHostedCheckoutVerificationUrl) {
+      inputHostedCheckoutVerificationUrl.value = codeUrl;
+    }
+    if (inputHostedCheckoutPhone) {
+      inputHostedCheckoutPhone.value = phone;
+    }
+    if (inputHostedCheckoutSendLinkUrl) {
+      inputHostedCheckoutSendLinkUrl.classList.remove('is-invalid');
+      inputHostedCheckoutSendLinkUrl.title = '';
+    }
+    hostedCheckoutSendLinkUrlDraft = validation.url;
+    hostedCheckoutSendLinkUrlTouched = true;
+
+    setHostedCheckoutManualCodeDisplay('未获取');
+    validateHostedCheckoutContactConfig();
+    syncActivePlusCheckoutProfilePatch({
+      hostedCheckoutVerificationUrl: codeUrl,
+      hostedCheckoutPhoneNumber: phone,
+      hostedCheckoutReadyUrl: readyUrl,
+      hostedCheckoutResendUrl: resendUrl,
+      hostedCheckoutCompleteUrl: completeUrl,
+    });
+    syncLatestState({ hostedCheckoutSendLinkUrl: validation.url });
+    markSettingsDirty(true);
+    await saveSettings({ silent: true });
+    showToast('已获取发码链接并填入 PayPal 接码配置。', 'success', 2500);
+  } catch (error) {
+    const message = error?.message || String(error || '获取发码链接失败');
+    showToast(message, 'error');
+  } finally {
+    btnHostedCheckoutSendLinkFetch.disabled = false;
+    btnHostedCheckoutSendLinkFetch.textContent = previousLabel || '获取';
+  }
+}
+
 function handlePlusCheckoutModeSelectionChange(nextMode) {
   const previousMode = getActivePlusCheckoutModeFromState(latestState);
   const previousProfileDraft = buildPlusCheckoutProfileFromInputs();
@@ -18322,6 +18502,30 @@ inputPlusCheckoutCloudConversionApiKey?.addEventListener('input', () => {
 inputPlusCheckoutCloudConversionApiKey?.addEventListener('blur', () => {
   inputPlusCheckoutCloudConversionApiKey.value = normalizePlusCheckoutCloudConversionApiKeyValue(inputPlusCheckoutCloudConversionApiKey.value);
   saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHostedCheckoutSendLinkUrl?.addEventListener('input', () => {
+  hostedCheckoutSendLinkUrlDraft = inputHostedCheckoutSendLinkUrl.value;
+  hostedCheckoutSendLinkUrlTouched = true;
+}, true);
+inputHostedCheckoutSendLinkUrl?.addEventListener('input', () => {
+  inputHostedCheckoutSendLinkUrl.classList.remove('is-invalid');
+  inputHostedCheckoutSendLinkUrl.title = '';
+  hostedCheckoutSendLinkUrlDraft = inputHostedCheckoutSendLinkUrl.value;
+  hostedCheckoutSendLinkUrlTouched = true;
+});
+inputHostedCheckoutSendLinkUrl?.addEventListener('blur', () => {
+  setHostedCheckoutSendLinkInputValue(inputHostedCheckoutSendLinkUrl.value, 'hostedCheckoutSendLinkUrl:blur');
+  hostedCheckoutSendLinkUrlDraft = normalizeHostedCheckoutSendLinkUrlValue(inputHostedCheckoutSendLinkUrl.value);
+  hostedCheckoutSendLinkUrlTouched = Boolean(hostedCheckoutSendLinkUrlDraft);
+  syncLatestState({ hostedCheckoutSendLinkUrl: hostedCheckoutSendLinkUrlDraft });
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+btnHostedCheckoutSendLinkFetch?.addEventListener('click', () => {
+  handleHostedCheckoutSendLinkFetch().catch((error) => {
+    showToast(error?.message || String(error || '获取发码链接失败'), 'error');
+  });
 });
 
 inputHostedCheckoutVerificationUrl?.addEventListener('input', () => {
@@ -19558,6 +19762,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(message.payload.hostedCheckoutVerificationUrl);
         setHostedCheckoutManualCodeDisplay('未获取');
         validateHostedCheckoutContactConfig();
+      }
+      if (
+        message.payload.hostedCheckoutSendLinkUrl !== undefined
+        && inputHostedCheckoutSendLinkUrl
+        && document.activeElement !== inputHostedCheckoutSendLinkUrl
+      ) {
+        hostedCheckoutSendLinkUrlDraft = normalizeHostedCheckoutSendLinkUrlValue(message.payload.hostedCheckoutSendLinkUrl);
+        hostedCheckoutSendLinkUrlTouched = Boolean(hostedCheckoutSendLinkUrlDraft);
+        setHostedCheckoutSendLinkInputValue(hostedCheckoutSendLinkUrlDraft, 'runtime:hostedCheckoutSendLinkUrl');
       }
       if (message.payload.hostedCheckoutPhoneNumber !== undefined && inputHostedCheckoutPhone) {
         inputHostedCheckoutPhone.value = normalizeHostedCheckoutPhoneValue(message.payload.hostedCheckoutPhoneNumber);

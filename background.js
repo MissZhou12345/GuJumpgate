@@ -1106,6 +1106,10 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutConversionProxyUrl: '',
   hostedCheckoutVerificationPopupDelaySeconds: 20,
   hostedCheckoutVerificationUrl: '',
+  hostedCheckoutSendLinkUrl: '',
+  hostedCheckoutReadyUrl: '',
+  hostedCheckoutResendUrl: '',
+  hostedCheckoutCompleteUrl: '',
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
   hostedCheckoutSmsPoolUsage: {},
@@ -1327,6 +1331,9 @@ const PLUS_CHECKOUT_MODE_JP_PP = 'jp_pp';
 const DEFAULT_PLUS_CHECKOUT_MODE = PLUS_CHECKOUT_MODE_US_PP;
 const PLUS_CHECKOUT_PROFILE_SETTING_KEYS = Object.freeze([
   'hostedCheckoutVerificationUrl',
+  'hostedCheckoutReadyUrl',
+  'hostedCheckoutResendUrl',
+  'hostedCheckoutCompleteUrl',
   'hostedCheckoutPhoneNumber',
   'hostedCheckoutSmsPoolText',
   'hostedCheckoutSmsPoolUsage',
@@ -1339,6 +1346,9 @@ const PLUS_CHECKOUT_MODE_VALUES = Object.freeze([
 function buildDefaultPlusCheckoutProfile() {
   return {
     hostedCheckoutVerificationUrl: '',
+    hostedCheckoutReadyUrl: '',
+    hostedCheckoutResendUrl: '',
+    hostedCheckoutCompleteUrl: '',
     hostedCheckoutPhoneNumber: '',
     hostedCheckoutSmsPoolText: '',
     hostedCheckoutSmsPoolUsage: {},
@@ -3768,6 +3778,9 @@ function normalizePersistentSettingValue(key, value) {
         PERSISTED_SETTING_DEFAULTS.hostedCheckoutVerificationPopupDelaySeconds
       );
     case 'hostedCheckoutVerificationUrl':
+    case 'hostedCheckoutReadyUrl':
+    case 'hostedCheckoutResendUrl':
+    case 'hostedCheckoutCompleteUrl':
       try {
         const rawValue = String(value || '').trim();
         if (!rawValue) {
@@ -3782,6 +3795,8 @@ function normalizePersistentSettingValue(key, value) {
           .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
           .replace(/[?&]$/g, '');
       }
+    case 'hostedCheckoutSendLinkUrl':
+      return String(value || '').trim();
     case 'hostedCheckoutPhoneNumber':
       return String(value || '').trim();
     case 'hostedCheckoutSmsPoolText':
