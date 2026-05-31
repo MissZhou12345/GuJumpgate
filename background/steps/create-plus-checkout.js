@@ -2776,6 +2776,42 @@ function FindProxyForURL(url, host) {
       }
     }
 
+    async function notifyHostedCheckoutCompleteUrl(completeUrl = '') {
+      const statusUrl = normalizeHostedCheckoutPoolUrl(completeUrl || '');
+      if (!statusUrl) {
+        return { skipped: true };
+      }
+      const fetcher = typeof fetchImpl === 'function'
+        ? fetchImpl
+        : (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
+      if (typeof fetcher !== 'function') {
+        await addLog('步骤 6：当前运行环境不支持 fetch，已跳过 complete_url 通知。', 'warn');
+        return { skipped: true };
+      }
+      try {
+        const response = await fetcher(statusUrl, {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json,text/plain,*/*',
+            'Cache-Control': 'no-cache, no-store, max-age=0',
+            Pragma: 'no-cache',
+          },
+        });
+        const text = await response.text().catch(() => '');
+        if (!response.ok) {
+          await addLog(`步骤 6：complete_url 通知返回 HTTP ${response.status || '未知'}：${String(text || '').slice(0, 200)}`, 'warn');
+          return { ok: false, status: response.status || 0 };
+        }
+        await addLog('步骤 6：已同步调用 complete_url，通知短信发送方调用已完成。', 'info');
+        return { ok: true, status: response.status || 0 };
+      } catch (error) {
+        await addLog(`步骤 6：complete_url 通知失败：${error?.message || String(error || '未知错误')}`, 'warn');
+        return { ok: false, error };
+      }
+    }
+
     async function fetchHostedCheckoutVerificationCodeManually(options = {}) {
       const manualVerificationUrl = String(options?.verificationUrl || '').trim();
       if (manualVerificationUrl) {
@@ -4068,6 +4104,13 @@ function FindProxyForURL(url, host) {
         return;
       }
       await addLog('步骤 6：hosted checkout 支付链路已完成，准备进入下一步。', 'ok');
+      const completeRuntimeConfig = await getHostedCheckoutRuntimeConfig({
+        ensureCurrentSmsEntry: false,
+      });
+      const completeUrl = normalizeHostedCheckoutPoolUrl(completeRuntimeConfig?.completeUrl || '');
+      if (completeUrl) {
+        await notifyHostedCheckoutCompleteUrl(completeUrl);
+      }
       await refreshOAuthTimeoutWindowAfterHostedCheckoutSuccess();
       await completePlusCheckoutCreate(completionPayload);
     }
